@@ -1,0 +1,38 @@
+.colorbar-panel {
+    position: absolute;
+    bottom: 35px;
+    right: 20px;
+    z-index: 99999;
+    background-color: rgba(8228, 223, 223, 0.9);
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    font-size: 12px;
+    text-align: center;
+    cursor: move; /* Shows move cursor */
+    font-family: Arial, sans-serif; 
+    font-size: 12px;
+}
+.colorbar-labels {
+    height: 160px;
+    display: flex; 
+    flex-direction: column; 
+    justify-content: space-between;
+}
+
+.colorbar-panel .drag-handle {
+    width: 100%;
+    height: 16px;
+    cursor: move;
+    background: rgba(228, 223, 223, 0.9);
+    border-radius: 6px 6px 0 0;
+    margin-bottom: 6px;
+}
+
+.colorbar-gradient {
+    width: 20px !important;
+    height: 160px !important;
+    border-radius: 10px;
+    margin-bottom: 5px;
+    /* Do not set background here; it is set inline in HTML */
+}

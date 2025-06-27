@@ -1,0 +1,7 @@
+streamlit
+geemap
+folium
+geopy
+earthengine-api
+pandas
+setuptools
