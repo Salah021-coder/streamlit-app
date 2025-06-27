@@ -120,6 +120,11 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                 index_name = 'RGB'
             else:
                 img = index_function[index](img, sensor_type)
+                vis_params = {}  # Ensure vis_params is always a new dict for indices
+                if index in index_palette:
+                    vis_params['palette'] = index_palette[index]
+                img = img.select(index)
+                index_name = index
                 # Compute min/max using percentiles like Earth Engine
                 min_val, max_val = None, None
                 if index in ['NDVI', 'NDBI', 'NBR', 'EVI']:
@@ -133,7 +138,6 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                         )
                         min_val = percentiles.get(f"{index}_p{int(stretch_min)}")
                         max_val = percentiles.get(f"{index}_p{int(stretch_max)}")
-                        # Only call getInfo() if the value is not None
                         min_val = min_val.getInfo() if min_val is not None else None
                         max_val = max_val.getInfo() if max_val is not None else None
                 # Set vis_params based on stretch
@@ -143,13 +147,11 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                     and max_val is not None
                     and min_val != max_val
                 ):
-                    vis_params = {'min': min_val, 'max': max_val}
+                    vis_params['min'] = min_val
+                    vis_params['max'] = max_val
                 else:
-                    vis_params = {'min': -1, 'max': 1}
-                if index in index_palette:
-                    vis_params['palette'] = index_palette[index]
-                img = img.select(index)
-                index_name = index
+                    vis_params['min'] = -1
+                    vis_params['max'] = 1
             m = geemap.Map()
             m.add_basemap('HYBRID')
             m.centerObject(roi_geom, 12)            
@@ -168,9 +170,7 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                 )
                 min_val = stats.get(index + '_min').getInfo()
                 max_val = stats.get(index + '_max').getInfo()
-            # Only add colorbar if palette is present in vis_params
-            if 'palette' in vis_params:
-                m.add_colorbar(vis_params, label=index_name, layer_name=index_name, orientation='vertical')
+            
             css_path = pathlib.Path("style/style.css").resolve()
             with open(css_path, "r") as f:
                 custom_css = f"<style>{f.read()}</style>"
