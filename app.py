@@ -146,8 +146,7 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                     vis_params = {'min': min_val, 'max': max_val}
                 else:
                     vis_params = {'min': -1, 'max': 1}
-                if index in index_palette:
-                    vis_params['palette'] = index_palette[index]
+                    
                 img = img.select(index)
                 index_name = index
             m = geemap.Map()
