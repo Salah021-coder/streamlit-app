@@ -57,7 +57,7 @@ def CalculateEVI(image, sensor):
     ).rename('EVI')
     return image.addBands(EVI)
 
-st.title("🛰️ Earth Engine Satellite Imagery Viewer 🛰️")
+st.title("🛰️ Satellite / Index Viewer 🛰️")
 
 start_date = st.text_input("Start Date", "2017-01-01")
 end_date = st.text_input("End Date", "2025-01-01")
@@ -240,7 +240,7 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                 </script>
                 """
                 m.get_root().html.add_child(folium.Element(draggable_js))
-            st.components.v1.html(m.to_html(), height=600)
+            st.components.v1.html(m.to_html(), height=600, width=800)
         else:
             st.error("No images found for the selected location and time range.")
     except Exception as e:
