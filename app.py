@@ -57,7 +57,7 @@ def CalculateEVI(image, sensor):
     ).rename('EVI')
     return image.addBands(EVI)
 
-st.title("🛰️ Earth Engine Satellite Imagery Viewer (Streamlit)")
+st.title("🛰️ Earth Engine Satellite Imagery Viewer 🛰️")
 
 start_date = st.text_input("Start Date", "2017-01-01")
 end_date = st.text_input("End Date", "2025-01-01")
@@ -129,7 +129,7 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                 min_val, max_val = None, None
                 if index in ['NDVI', 'NDBI', 'NBR', 'EVI']:
                     stats_geom = roi_geom.buffer(2000)  # 2km buffer
-                    if stretch_type == "Percentile (like Earth Engine)":
+                    if stretch_type == "Percentile (%)":
                         percentiles = img.reduceRegion(
                             reducer=ee.Reducer.percentile([stretch_min, stretch_max]),
                             geometry=stats_geom,
