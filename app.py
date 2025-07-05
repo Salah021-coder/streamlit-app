@@ -61,7 +61,31 @@ st.title("🛰️ Satellite / Index Viewer 🛰️")
 
 start_date = st.text_input("Start Date", "2017-01-01")
 end_date = st.text_input("End Date", "2025-01-01")
-location = st.text_input("Location", "", placeholder="Enter a place name or coordinates")
+
+def get_location_suggestions(query, max_results=5):
+    if not query:
+        return []
+    geolocator = Nominatim(user_agent="MyGeocoder")
+    try:
+        locations = geolocator.geocode(query, exactly_one=False, limit=max_results, addressdetails=True)
+        if not locations:
+            return []
+        suggestions = []
+        for loc in locations:
+            display_name = loc.address
+            suggestions.append(display_name)
+        return suggestions
+    except Exception:
+        return []
+
+# Location search with suggestions
+location_query = st.text_input("Location", "", placeholder="Enter a place name or coordinates")
+location_suggestions = get_location_suggestions(location_query, 5) if location_query else []
+if location_suggestions:
+    selected_location = st.selectbox("Suggestions", location_suggestions)
+else:
+    selected_location = location_query
+
 index = st.selectbox("Index", ['RGB', 'NDVI', 'NDBI', 'NBR', 'EVI'])
 # Add stretch option
 stretch_type = st.selectbox("Stretch", ["Default (-1, 1)", "Percentile (like Earth Engine)"])
@@ -106,150 +130,79 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
             else:
                 dataset = dataset.filter(ee.Filter.lte('CLOUD_COVER', cloud_percent))
                 rgb_vis_params = {'min': 0, 'max': 3000, 'bands': ['SR_B4', 'SR_B3', 'SR_B2']}
+
             img = dataset.first()
             if img is None or img.getInfo() is None:
                 st.error("No images found for the selected location and time range.")
                 return
+
             if index == 'RGB':
-                if 'S2' in satellite:
-                    img = img.select(['B4', 'B3', 'B2'])
-                    vis_params = rgb_vis_params
-                else:
-                    img = img.select(['SR_B4', 'SR_B3', 'SR_B2'])
-                    vis_params = rgb_vis_params
+                img = img.select(rgb_vis_params['bands'])
+                vis_params = rgb_vis_params
                 index_name = 'RGB'
             else:
-                img = index_function[index](img, sensor_type)
-                vis_params = {}  # Ensure vis_params is always a new dict for indices
-                if index in index_palette:
-                    vis_params['palette'] = index_palette[index]
-                img = img.select(index)
-                index_name = index
-                # Compute min/max using percentiles like Earth Engine
-                min_val, max_val = None, None
-                if index in ['NDVI', 'NDBI', 'NBR', 'EVI']:
-                    stats_geom = roi_geom.buffer(2000)  # 2km buffer
-                    if stretch_type == "Percentile (%)":
-                        percentiles = img.reduceRegion(
-                            reducer=ee.Reducer.percentile([stretch_min, stretch_max]),
-                            geometry=stats_geom,
-                            scale=30,
-                            maxPixels=1e13
-                        )
-                        min_val = percentiles.get(f"{index}_p{int(stretch_min)}")
-                        max_val = percentiles.get(f"{index}_p{int(stretch_max)}")
-                        min_val = min_val.getInfo() if min_val is not None else None
-                        max_val = max_val.getInfo() if max_val is not None else None
-                # Set vis_params based on stretch
-                if (
-                    stretch_type == "Percentile (like Earth Engine)"
-                    and min_val is not None
-                    and max_val is not None
-                    and min_val != max_val
-                ):
-                    vis_params['min'] = min_val
-                    vis_params['max'] = max_val
+                img = index_function[index](img, sensor_type).select(index)
+                vis_params = {'palette': index_palette[index]}
+                stats_geom = roi_geom.buffer(2000)
+                if stretch_type == "Percentile (like Earth Engine)":
+                    percentiles = img.reduceRegion(
+                        reducer=ee.Reducer.percentile([stretch_min, stretch_max]),
+                        geometry=stats_geom,
+                        scale=30,
+                        maxPixels=1e13
+                    )
+                    min_val = percentiles.get(f"{index}_p{int(stretch_min)}").getInfo()
+                    max_val = percentiles.get(f"{index}_p{int(stretch_max)}").getInfo()
                 else:
-                    vis_params['min'] = -1
-                    vis_params['max'] = 1
+                    stats = img.reduceRegion(
+                        reducer=ee.Reducer.minMax(),
+                        geometry=stats_geom,
+                        scale=30,
+                        maxPixels=1e13
+                    )
+                    min_val = stats.get(index + '_min').getInfo()
+                    max_val = stats.get(index + '_max').getInfo()
+
+                vis_params['min'] = min_val
+                vis_params['max'] = max_val
+                index_name = index
+
+            # Display map
             m = geemap.Map()
             m.add_basemap('HYBRID')
-            m.centerObject(roi_geom, 12)            
+            m.centerObject(roi_geom, 9)
             m.addLayer(img, vis_params, index_name)
-
-            # Compute min/max over a larger region for better stats
-            min_val, max_val = None, None
-            if index in ['NDVI', 'NDBI', 'NBR', 'EVI']:
-                # Use a buffer around the point for the stats region
-                stats_geom = roi_geom.buffer(2000)  # 2km buffer
-                stats = img.reduceRegion(
-                    reducer=ee.Reducer.minMax(),
-                    geometry=stats_geom,
-                    scale=30,
-                    maxPixels=1e13
-                )
-                min_val = stats.get(index + '_min').getInfo()
-                max_val = stats.get(index + '_max').getInfo()
-            
-            css_path = pathlib.Path("style/style.css").resolve()
-            with open(css_path, "r") as f:
-                custom_css = f"<style>{f.read()}</style>"
-            m.get_root().header.add_child(folium.Element(custom_css))
-
-            # Only add colorbar panel for indices (not RGB)
-            if index in ["NDVI", "NDBI", "NBR", "EVI"]:
-                # Use fixed gradients for each index
-                if index == "NDVI":
-                    gradient = "linear-gradient(to top, #654321, #D2B48C, #FFFF00, #7FFF00, #006400)"
-                elif index == "NDBI":
-                    gradient = "linear-gradient(to top, #FFFFFF, #D3D3D3, #A9A9A9, #696969, #000000)"
-                elif index == "NBR":
-                    gradient = "linear-gradient(to top, #006400, #7CFC00, #FFBF00, #FF0000, #8B0000)"
-                elif index == "EVI":
-                    gradient = "linear-gradient(to top, #ADD8E6, #00FFFF, #008080, #00FF00, #006400)"
-                colorbar_html = f"""
-<div class="colorbar-panel" id="colorbar-panel" style="font-family: Arial, sans-serif; font-size: 12px;">
-    <div class="drag-handle"></div>
-    <b style="display: inline-block; margin-bottom: 4px;">{index_name} Value</b><br>
-    <div style="display: flex; flex-direction: row; align-items: center; gap: 16px;">
-        <!-- Colorbar -->
-        <div class="colorbar-gradient" style="background: {gradient};"></div>
-        <!-- Labels -->
-        <div class="colorbar-labels" style="gap: 4px; display: flex; flex-direction: column; align-items: center;">
-            <span>{vis_params['max']:.2f}</span>
-            <span>{vis_params['min']:.2f}</span>
-        </div>
-    </div>
-</div>
-"""
-                m.get_root().html.add_child(folium.Element(colorbar_html))
-
-                # Inject draggable JS
-                draggable_js = """
-                <script>
-                (function() {
-                  var panel = document.getElementById('colorbar-panel');
-                  var handle = panel.querySelector('.drag-handle');
-                  var isDragging = false, startX, startY, startLeft, startTop;
-
-                  handle.addEventListener('mousedown', function(e) {
-                    isDragging = true;
-                    startX = e.clientX;
-                    startY = e.clientY;
-                    var rect = panel.getBoundingClientRect();
-                    startLeft = rect.left;
-                    startTop = rect.top;
-                    document.body.style.userSelect = 'none';
-                  });
-
-                  document.addEventListener('mousemove', function(e) {
-                    if (!isDragging) return;
-                    var dx = e.clientX - startX;
-                    var dy = e.clientY - startY;
-                    panel.style.left = (startLeft + dx) + 'px';
-                    panel.style.top = (startTop + dy) + 'px';
-                    panel.style.right = 'auto';
-                    panel.style.bottom = 'auto';
-                  });
-
-                  document.addEventListener('mouseup', function() {
-                    isDragging = false;
-                    document.body.style.userSelect = '';
-                  });
-                })();
-                </script>
-                """
-                m.get_root().html.add_child(folium.Element(draggable_js))
             st.components.v1.html(m.to_html(), height=600, width=800)
+
+            # Download GeoTIFF if index
+            if index != 'RGB':
+                try:
+                    clipped = img.clip(roi_geom)
+                    download_params = {
+                        'scale': 30 if 'LANDSAT' in satellite else 10,
+                        'region': roi_geom.buffer(1000).bounds().getInfo()['coordinates'],
+                        'fileFormat': 'GeoTIFF',
+                        'formatOptions': {'cloudOptimized': True}
+                    }
+                    url = clipped.getDownloadURL(download_params)
+
+                    if st.button(f"\U0001F4E5 Generate {index} GeoTIFF"):
+                        st.success("Download link is ready:")
+                        st.markdown(f"[Click here to download {index} as GeoTIFF]({url})", unsafe_allow_html=True)
+
+                except Exception as e:
+                    st.error(f"Failed to generate GeoTIFF download: {e}")
+
         else:
             st.error("No images found for the selected location and time range.")
+
     except Exception as e:
-        st.error(f"Error fetching dataset: {str(e)}")
+        st.error(f"Error processing image: {e}")
 
 if st.button("Update Map"):
-    if not location:
+    if not selected_location:
         st.warning("Please enter a location.")
     else:
-        roi_geom = get_roi_geom(location)
+        roi_geom = get_roi_geom(selected_location)
         if roi_geom:
             show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent)
