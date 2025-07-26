@@ -5,3 +5,4 @@ geopy
 earthengine-api
 pandas
 setuptools
+osmnx
