@@ -345,7 +345,7 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
             palette = index_palette[index]
             gradient = f"linear-gradient(to top, {', '.join(palette)})"
             colorbar_html = f"""
-            <div class="colorbar-panel" id="colorbar-panel" style="position: absolute; bottom: 35px; right: 20px; z-index: 99999; background-color: rgba(89, 99, 88, 0.80); padding: 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); font-size: 12px; text-align: center;">
+            <div class="colorbar-panel" id="colorbar-panel" style="position: absolute; bottom: 35px; right: 20px; z-index: 99999; background-color: rgb(255, 255, 255); padding: 10px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); font-size: 12px; text-align: center;">
                 <b>{index_name} Value</b><br>
                 <div style="display: flex; flex-direction: row; align-items: center; gap: 16px;">
                     <div class="colorbar-gradient" style="width: 20px; height: 120px; background: {gradient}; border-radius: 10px; margin-bottom: 5px;"></div>
@@ -387,4 +387,5 @@ if st.button("Update Map"):
         if roi_geom:
             show_map(roi_geom, start_date, end_date,
                      satellite, index, cloud_percent)
+
 
