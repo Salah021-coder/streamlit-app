@@ -10,9 +10,14 @@ import folium
 import pathlib
 import json
 
+service_account_info = st.secrets["ee"]
+
+credentials = ee.ServiceAccountCredentials(
+    email=service_account_info["client_email"],
+    key_data=json.dumps(dict(service_account_info))  # Fix: convert AttrDict to JSON
+)
 try:
-    ee.Authenticate()
-    ee.Initialize(project="mechakra-2003")
+    ee.Initialize(credentials)
 except Exception as e:
     st.error(f"Failed to initialize Earth Engine: {e}")
     st.stop()
@@ -382,3 +387,4 @@ if st.button("Update Map"):
         if roi_geom:
             show_map(roi_geom, start_date, end_date,
                      satellite, index, cloud_percent)
+
