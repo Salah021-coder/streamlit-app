@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import geopandas as gpd
 import osmnx as ox
 import ee
 from geopy.geocoders import Nominatim
@@ -8,6 +9,7 @@ import geemap.colormaps as cm
 import folium
 import pathlib
 import json
+
 
 service_account_info = st.secrets["ee"]
 
@@ -22,32 +24,40 @@ except Exception as e:
     st.stop()
 
 def CalculateNDVI(image, sensor):
-    bands = {'89': ['SR_B4', 'SR_B5'], '457': ['SR_B3', 'SR_B4'], 'S2': ['B8', 'B4']}
+    bands = {'89': ['SR_B4', 'SR_B5'], '457': [
+        'SR_B3', 'SR_B4'], 'S2': ['B8', 'B4']}
     if sensor not in bands:
         raise ValueError(f"Unknown sensor type: {sensor}")
     NDVI = image.normalizedDifference(bands[sensor]).rename('NDVI')
     return image.addBands(NDVI)
 
+
 def CalculateNDBI(image, sensor):
-    bands = {'89': ['SR_B6', 'SR_B5'], '457': ['SR_B5', 'SR_B4'], 'S2': ['B11', 'B8']}
+    bands = {'89': ['SR_B6', 'SR_B5'], '457': [
+        'SR_B5', 'SR_B4'], 'S2': ['B11', 'B8']}
     if sensor not in bands:
         raise ValueError(f"Unknown sensor type: {sensor}")
     NDBI = image.normalizedDifference(bands[sensor]).rename('NDBI')
     return image.addBands(NDBI)
 
+
 def CalculateNDWI(image, sensor):
-    bands = {'89': ['SR_B3', 'SR_B5'], '457': ['SR_B2', 'SR_B4'], 'S2': ['B3', 'B8']}
+    bands = {'89': ['SR_B3', 'SR_B5'], '457': [
+        'SR_B2', 'SR_B4'], 'S2': ['B3', 'B8']}
     if sensor not in bands:
         raise ValueError(f"Unknown sensor type: {sensor}")
     NDWI = image.normalizedDifference(bands[sensor]).rename('NDWI')
     return image.addBands(NDWI)
 
+
 def CalculateNDSI(image, sensor):
-    bands = {'89': ['SR_B3', 'SR_B6'], '457': ['SR_B2', 'SR_B5'], 'S2': ['B3', 'B11']}
+    bands = {'89': ['SR_B3', 'SR_B6'], '457': [
+        'SR_B2', 'SR_B5'], 'S2': ['B3', 'B11']}
     if sensor not in bands:
         raise ValueError(f"Unknown sensor type: {sensor}")
     NDSI = image.normalizedDifference(bands[sensor]).rename('NDSI')
     return image.addBands(NDSI)
+
 
 def CalculateSAVI(image, sensor):
     bands = {
@@ -66,6 +76,7 @@ def CalculateSAVI(image, sensor):
     ).rename('SAVI')
     return image.addBands(SAVI)
 
+
 def CalculateMSAVI(image, sensor):
     bands = {
         '89': {'NIR': 'SR_B5', 'RED': 'SR_B4'},
@@ -83,6 +94,7 @@ def CalculateMSAVI(image, sensor):
     ).rename('MSAVI')
     return image.addBands(MSAVI)
 
+
 def CalculateGNDVI(image, sensor):
     bands = {
         '89': {'NIR': 'SR_B5', 'GREEN': 'SR_B3'},
@@ -91,8 +103,10 @@ def CalculateGNDVI(image, sensor):
     }
     if sensor not in bands:
         raise ValueError(f"Unknown sensor type: {sensor}")
-    GNDVI = image.normalizedDifference([bands[sensor]['NIR'], bands[sensor]['GREEN']]).rename('GNDVI')
+    GNDVI = image.normalizedDifference(
+        [bands[sensor]['NIR'], bands[sensor]['GREEN']]).rename('GNDVI')
     return image.addBands(GNDVI)
+
 
 def CalculateGCI(image, sensor):
     bands = {
@@ -111,12 +125,15 @@ def CalculateGCI(image, sensor):
     ).rename('GCI')
     return image.addBands(GCI)
 
+
 def CalculateNBR(image, sensor):
-    bands = {'89': ['SR_B5', 'SR_B7'], '457': ['SR_B4', 'SR_B7'], 'S2': ['B8', 'B12']}
+    bands = {'89': ['SR_B5', 'SR_B7'], '457': [
+        'SR_B4', 'SR_B7'], 'S2': ['B8', 'B12']}
     if sensor not in bands:
         raise ValueError(f"Unknown sensor type: {sensor}")
     NBR = image.normalizedDifference(bands[sensor]).rename('NBR')
     return image.addBands(NBR)
+
 
 def CalculateEVI(image, sensor):
     bands = {
@@ -134,32 +151,75 @@ def CalculateEVI(image, sensor):
     ).rename('EVI')
     return image.addBands(EVI)
 
+
 st.title("🛰️ Satellite / Index Viewer 🛰️")
 start_date = st.text_input("Start Date", "2017-01-01")
 end_date = st.text_input("End Date", "2025-01-01")
 
 # Use OSMnx for location suggestions
-def get_location_suggestions(query, max_results=5):
+
+
+geolocator = Nominatim(user_agent="sat-index-viewer")
+
+def get_location_suggestions(query: str, limit: int = 5):
+    """Return list of dicts: [{'name', 'lat', 'lon'}, ...]"""
     if not query:
         return []
     try:
-        gdf = ox.geocoder.geocode_to_gdf(query, which_result=None)
-        if gdf.empty:
+        hits = geolocator.geocode(
+            query, exactly_one=False, limit=limit, addressdetails=True
+        )
+        if not hits:
             return []
-        return gdf['display_name'].tolist()[:max_results]
+        return [{"name": h.address, "lat": h.latitude, "lon": h.longitude} for h in hits]
     except Exception as e:
-        st.warning(f"Location suggestion error: {e}")
+        st.warning(f"Suggestion lookup error: {e}")
         return []
 
-location_query = st.text_input("Location", "", placeholder="Enter a place name or coordinates")
-location_suggestions = get_location_suggestions(location_query, 5) if location_query else []
-selected_location = st.selectbox("Suggestions", location_suggestions) if location_suggestions else location_query
+def boundary_gdf_from_name(name: str) -> gpd.GeoDataFrame | None:
+    """Get polygon/multipolygon boundary as a GeoDataFrame (EPSG:4326)."""
+    try:
+        # Try OSMnx with dictionary for admin areas (works better for Wilayas/States/Regions)
+        if "wilaya" in name.lower():
+            gdf = ox.geocode_to_gdf({"state": name.replace("wilaya", "").strip(),
+                                     "country": "Algeria"})
+        else:
+            gdf = ox.geocode_to_gdf(name, which_result=None)
+
+        if gdf is None or gdf.empty:
+            return None
+
+        gdf = gdf.to_crs(epsg=4326)
+
+        # Prefer polygon/multipolygon
+        polys = gdf[gdf.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
+        if not polys.empty:
+            return polys.iloc[[0]][["geometry"]]
+
+        # If only point -> rough buffer
+        pt_rows = gdf[gdf.geometry.geom_type == "Point"]
+        if not pt_rows.empty:
+            pt = pt_rows.geometry.iloc[0]
+            rough = gpd.GeoDataFrame(
+                geometry=[pt.buffer(0.02).envelope], crs="EPSG:4326"
+            )
+            return rough
+
+        return gdf.iloc[[0]][["geometry"]]
+
+    except Exception as e:
+        st.error(f"Error locating geometry: {e}")
+        return None
 
 # Select options
-index = st.selectbox("Index", ['RGB', 'NDVI', 'NDBI', 'NBR', 'EVI', 'NDSI', 'NDWI', 'SAVI', 'MSAVI', 'GNDVI', 'GCI'])
-stretch_type = st.selectbox("Stretch", ["Default (-1, 1)", "Percentile (like Earth Engine)"])
-stretch_min = st.number_input("Stretch Min Percentile", min_value=0, max_value=100, value=2, step=1)
-stretch_max = st.number_input("Stretch Max Percentile", min_value=0, max_value=100, value=98, step=1)
+index = st.selectbox("Index", ['RGB', 'NDVI', 'NDBI', 'NBR',
+                     'EVI', 'NDSI', 'NDWI', 'SAVI', 'MSAVI', 'GNDVI', 'GCI'])
+stretch_type = st.selectbox(
+    "Stretch", ["Default (-1, 1)", "Percentile (like Earth Engine)"])
+stretch_min = st.number_input(
+    "Stretch Min Percentile", min_value=0, max_value=100, value=2, step=1)
+stretch_max = st.number_input(
+    "Stretch Max Percentile", min_value=0, max_value=100, value=98, step=1)
 cloud_percent = st.slider("Cloud %", 0, 100, 10)
 
 satellite_options = {
@@ -173,51 +233,50 @@ satellite_options = {
 satellite_name = st.selectbox("Image", list(satellite_options.keys()))
 satellite = satellite_options[satellite_name]
 
-# Get ROI with OSMnx
-
-def get_roi_geom(location_name):
-    try:
-        gdf = ox.geocoder.geocode_to_gdf(location_name)
-        if gdf.empty:
-            st.error("Location not found.")
-            return None
-        centroid = gdf.geometry.centroid.iloc[0]
-        lon, lat = centroid.x, centroid.y
-        return ee.Geometry.Point([lon, lat]).buffer(5000).bounds()
-    except Exception as e:
-        st.error(f"Error locating geometry: {e}")
-        return None
-
 # Visualization palettes/index functions (as in your original)
-index_function = {'NDVI': CalculateNDVI, 'NDBI': CalculateNDBI, 'NBR': CalculateNBR, 'EVI': CalculateEVI, 'NDSI': CalculateNDSI, 'NDWI': CalculateNDWI, 'SAVI': CalculateSAVI, 'MSAVI': CalculateMSAVI, 'GNDVI': CalculateGNDVI, 'GCI': CalculateGCI}
+index_function = {'NDVI': CalculateNDVI, 'NDBI': CalculateNDBI, 'NBR': CalculateNBR, 'EVI': CalculateEVI, 'NDSI': CalculateNDSI,
+                  'NDWI': CalculateNDWI, 'SAVI': CalculateSAVI, 'MSAVI': CalculateMSAVI, 'GNDVI': CalculateGNDVI, 'GCI': CalculateGCI}
 index_palette = {
     'NDVI': ['#440154', '#3b528b', '#21908d', '#5dc962', '#fde725'],  # Viridis
-    'NDBI': ['#f7fcf5', '#c7e9c0', '#74c476', '#238b45', '#00441b'],  # Green shades for built-up
-    'NBR':  ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#d9ef8b', '#a6d96a', '#1a9850'],  # Fire severity scale
-    'EVI':  ['#ffffe5', '#f7fcb9', '#d9f0a3', '#addd8e', '#78c679', '#31a354', '#006837'],  # Vegetation
-    'NDSI': ['#f7fcfd', '#e0ecf4', '#bfd3e6', '#9ebcda', '#8c96c6', '#8c6bb1', '#88419d', '#6e016b'],  # Snow index (Blue-Purple)
-    'NDWI': ['#f7fbff', '#deebf7', '#c6dbef', '#9ecae1', '#6baed6', '#3182bd', '#08519c'],  # Water
-    'SAVI': ['#ffffcc', '#c2e699', '#78c679', '#31a354', '#006837'],  # Similar to NDVI but with less saturation
-    'MSAVI': ['#f7fcf5', '#e5f5e0', '#c7e9c0', '#a1d99b', '#74c476', '#41ab5d', '#238b45'],  # Moderate SAVI
-    'GNDVI': ['#ffffe5', '#f7fcb9', '#d9f0a3', '#addd8e', '#78c679', '#31a354', '#006837'],  # Green NDVI
-    'GCI':   ['#edf8fb', '#b2e2e2', '#66c2a4', '#2ca25f', '#006d2c'],  # Chlorophyll concentration
+    # Green shades for built-up
+    'NDBI': ['#f7fcf5', '#c7e9c0', '#74c476', '#238b45', '#00441b'],
+    # Fire severity scale
+    'NBR':  ['#d73027', '#f46d43', '#fdae61', '#fee08b', '#d9ef8b', '#a6d96a', '#1a9850'],
+    # Vegetation
+    'EVI':  ['#ffffe5', '#f7fcb9', '#d9f0a3', '#addd8e', '#78c679', '#31a354', '#006837'],
+    # Snow index (Blue-Purple)
+    'NDSI': ['#f7fcfd', '#e0ecf4', '#bfd3e6', '#9ebcda', '#8c96c6', '#8c6bb1', '#88419d', '#6e016b'],
+    # Water
+    'NDWI': ['#f7fbff', '#deebf7', '#c6dbef', '#9ecae1', '#6baed6', '#3182bd', '#08519c'],
+    # Similar to NDVI but with less saturation
+    'SAVI': ['#ffffcc', '#c2e699', '#78c679', '#31a354', '#006837'],
+    # Moderate SAVI
+    'MSAVI': ['#f7fcf5', '#e5f5e0', '#c7e9c0', '#a1d99b', '#74c476', '#41ab5d', '#238b45'],
+    # Green NDVI
+    'GNDVI': ['#ffffe5', '#f7fcb9', '#d9f0a3', '#addd8e', '#78c679', '#31a354', '#006837'],
+    # Chlorophyll concentration
+    'GCI':   ['#edf8fb', '#b2e2e2', '#66c2a4', '#2ca25f', '#006d2c'],
 }
 
 
 # Display map
 
 def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
-    dataset = ee.ImageCollection(satellite).filterBounds(roi_geom).filterDate(start_date, end_date)
+    dataset = ee.ImageCollection(satellite).filterDate(start_date, end_date)
     try:
         if dataset.size().getInfo() == 0:
             st.error("No images found for the selected location and time range.")
             return
 
-        sensor_type = 'S2' if 'S2' in satellite else ('89' if '89' in satellite else '457')
-        dataset = dataset.filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE' if 'S2' in satellite else 'CLOUD_COVER', cloud_percent))
+        sensor_type = 'S2' if 'S2' in satellite else (
+            '89' if '89' in satellite else '457')
+        dataset = dataset.filter(ee.Filter.lte(
+            'CLOUDY_PIXEL_PERCENTAGE' if 'S2' in satellite else 'CLOUD_COVER', cloud_percent))
 
-        rgb_vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2']} if 'S2' in satellite else {'min': 0, 'max': 3000, 'bands': ['SR_B4', 'SR_B3', 'SR_B2']}
-        rgb_bands = ['B4', 'B3', 'B2'] if 'S2' in satellite else ['SR_B4', 'SR_B3', 'SR_B2']
+        rgb_vis_params = {'min': 0, 'max': 3000, 'bands': ['B4', 'B3', 'B2']} if 'S2' in satellite else {
+            'min': 0, 'max': 3000, 'bands': ['SR_B4', 'SR_B3', 'SR_B2']}
+        rgb_bands = ['B4', 'B3', 'B2'] if 'S2' in satellite else [
+            'SR_B4', 'SR_B3', 'SR_B2']
 
         # --- Fix: Always select only the bands needed for the chosen index ---
         if index == 'RGB':
@@ -244,14 +303,16 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                 if sensor_type == 'S2':
                     bands_needed = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12']
                 elif sensor_type == '89':
-                    bands_needed = ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']
+                    bands_needed = ['SR_B2', 'SR_B3',
+                                    'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7']
                 else:
-                    bands_needed = ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7']
+                    bands_needed = ['SR_B1', 'SR_B2',
+                                    'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7']
                 dataset = dataset.select(bands_needed)
-            img = dataset.mosaic()
+            img = dataset.mosaic().clip(roi_geom)
             img = index_function[index](img, sensor_type).select(index)
             vis_params = {'palette': index_palette[index]}
-            stats_geom = roi_geom.buffer(2000)
+            stats_geom = roi_geom
             if stretch_type == "Percentile (like Earth Engine)":
                 percentiles = img.reduceRegion(
                     reducer=ee.Reducer.percentile([stretch_min, stretch_max]),
@@ -259,8 +320,10 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
                     scale=30,
                     maxPixels=1e13
                 )
-                vis_params['min'] = percentiles.get(f"{index}_p{int(stretch_min)}").getInfo()
-                vis_params['max'] = percentiles.get(f"{index}_p{int(stretch_max)}").getInfo()
+                vis_params['min'] = percentiles.get(
+                    f"{index}_p{int(stretch_min)}").getInfo()
+                vis_params['max'] = percentiles.get(
+                    f"{index}_p{int(stretch_max)}").getInfo()
             else:
                 stats = img.reduceRegion(
                     reducer=ee.Reducer.minMax(),
@@ -274,7 +337,7 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
 
         m = geemap.Map()
         m.add_basemap('HYBRID')
-        m.centerObject(roi_geom, 9)
+        m.centerObject(roi_geom, 12)
         m.addLayer(img, vis_params, index_name)
         # --- Add HTML colorbar gradient for indices ---
         if index != 'RGB':
@@ -298,11 +361,29 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent):
     except Exception as e:
         st.error(f"Map error: {e}")
 
+
+# Location input and suggestion selection
+location_query = st.text_input("Location", "")
+suggestions = get_location_suggestions(location_query)
+selected_name = None
+selected_geometry = None
+
+if suggestions:
+    suggestion_names = [s['name'] for s in suggestions]
+    selected_idx = st.selectbox("Suggestions", range(len(suggestion_names)), format_func=lambda i: suggestion_names[i])
+    if selected_idx is not None and len(suggestions) > 0:
+        selected_name = suggestions[selected_idx]['name']
+        gdf = boundary_gdf_from_name(selected_name)
+        if gdf is not None:
+            selected_geometry = geemap.geopandas_to_ee(gdf)
+
 # Button trigger
 if st.button("Update Map"):
-    if not selected_location:
-        st.warning("Please enter a location.")
+    if not selected_name or not selected_geometry:
+        st.warning(
+            "Please enter a location and select a suggestion with a valid boundary.")
     else:
-        roi_geom = get_roi_geom(selected_location)
+        roi_geom = selected_geometry
         if roi_geom:
-            show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent)
+            show_map(roi_geom, start_date, end_date,
+                     satellite, index, cloud_percent)
