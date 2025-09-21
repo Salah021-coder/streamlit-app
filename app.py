@@ -18,7 +18,7 @@ import pandas as pd
 # ============================================================================
 
 st.set_page_config(
-    page_title="🛰️ Enhanced Satellite Index Viewer",
+    page_title="🛰️ Satellite Index Visualizer",
     page_icon="🛰️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -777,15 +777,13 @@ def show_map(roi_geom, start_date, end_date, satellite, index, cloud_percent,
         st.error(f"Map error: {e}")
         return None, None
 
-
 # ============================================================================
 # STREAMLIT USER INTERFACE
 # ============================================================================
 
-
 def create_sidebar_controls():
     """Create sidebar controls with unified percentile approach for both RGB and indices"""
-    st.sidebar.header("🛰️ Satellite Controls")
+    st.sidebar.header("🛰️ Satellite Parameters")
 
     # Date inputs
     start_date = st.sidebar.date_input(
