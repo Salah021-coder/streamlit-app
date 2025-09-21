@@ -1,7 +1,0 @@
-[theme]
-base="dark"
-primaryColor="#1DB954"   # accent (e.g., buttons, sliders)
-backgroundColor="#0E1117"
-secondaryBackgroundColor="#262730"
-textColor="#FAFAFA"
-font="Arial"
