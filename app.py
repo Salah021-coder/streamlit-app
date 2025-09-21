@@ -825,7 +825,7 @@ def create_location_input():
     col1, col2 = st.columns([3, 1])
     with col1:
         location_query = st.text_input(
-            "Search for a location:", placeholder="e.g., Paris, France or Algiers")
+            "Search for a location:", placeholder="Search for your location")
 
     selected_geometry = None
     selected_name = None
