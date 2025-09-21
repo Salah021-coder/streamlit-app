@@ -874,7 +874,7 @@ def main():
     initialize_earth_engine()
 
     # Title and description
-    st.title("🛰️ Enhanced Satellite Index Viewer")
+    st.title("🛰️ Enhanced Satellite Index Viewer 🛰️")
     st.markdown("""
     Visualize satellite imagery with customizable RGB band combinations and unified 
     percentile-based stretching for both RGB composites and spectral indices.
