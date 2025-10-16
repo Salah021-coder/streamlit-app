@@ -33,10 +33,9 @@ def initialize_earth_engine():
     """Initialize Google Earth Engine with service account credentials"""
     try:
         service_account_info = st.secrets["ee"]
-        key_data = json.dumps(dict(service_account_info))
-        credentials = ee.ServiceAccountCredentials(service_account_info["client_email"], key_data=key_data)
-        ee.Initialize(credentials)
-        st.success("✅ Google Earth Engine initialized successfully!")
+        credentials = ee.ServiceAccountCredentials(
+        email=service_account_info["client_email"],
+        key_data=json.dumps(dict(service_account_info))  # Fix: convert AttrDict to JSON)
     except Exception as e:
         st.error(f"Failed to initialize Earth Engine: {e}")
         st.stop()
