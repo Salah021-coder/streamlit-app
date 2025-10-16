@@ -33,12 +33,29 @@ def initialize_earth_engine():
     """Initialize Google Earth Engine with service account credentials"""
     try:
         service_account_info = st.secrets["ee"]
+        
+        # New approach: Use ee.Initialize() with both credentials and project ID
         credentials = ee.ServiceAccountCredentials(
-        email=service_account_info["client_email"],
-        key_data=json.dumps(dict(service_account_info)))
+            email=service_account_info["client_email"],
+            key_data=json.dumps(dict(service_account_info)))
+        
+        ee.Initialize(
+            credentials=credentials, 
+            project=service_account_info["project_id"]
+        )
+        
     except Exception as e:
-        st.error(f"Failed to initialize Earth Engine: {e}")
+        st.error(f"Failed to initialize Earth Engine. Make sure your service account JSON and project ID are correctly configured in `.streamlit/secrets.toml`. Error: {e}")
         st.stop()
+
+# ============================================================================
+# MAIN APPLICATION LOGIC
+# ============================================================================
+
+# Call the updated initialization function
+if "ee_initialized" not in st.session_state:
+    initialize_earth_engine()
+    st.session_state.ee_initialized = True
 
 
 # Satellite datasets configuration
