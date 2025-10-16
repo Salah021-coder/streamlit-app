@@ -32,9 +32,8 @@ st.set_page_config(
 def initialize_earth_engine():
     """Initialize Google Earth Engine with service account credentials"""
     try:
-        service_account_info = st.secrets["ee"]
-        credentials = ee.ServiceAccountCredentials(service_account_info["client_email"], key_data=json.dumps(dict(service_account_info)))
-        ee.Initialize(credentials)
+        ee.Authenticate()
+        ee.Initialize(project = "mechakra-2003")
     except Exception as e:
         st.error(f"Failed to initialize Earth Engine: {e}")
         st.stop()
