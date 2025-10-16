@@ -35,7 +35,7 @@ def initialize_earth_engine():
         service_account_info = st.secrets["ee"]
         credentials = ee.ServiceAccountCredentials(
         email=service_account_info["client_email"],
-        key_data=json.dumps(dict(service_account_info))  # Fix: convert AttrDict to JSON)
+        key_data=json.dumps(dict(service_account_info)))
     except Exception as e:
         st.error(f"Failed to initialize Earth Engine: {e}")
         st.stop()
