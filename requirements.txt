@@ -1,4 +1,4 @@
-streamlit
+streamlit==1.42
 geemap
 folium
 geopy
@@ -6,3 +6,4 @@ earthengine-api
 pandas
 setuptools
 osmnx
+
