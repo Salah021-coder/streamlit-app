@@ -1,6 +1,6 @@
 """
 Satellite Index Viewer - A Streamlit application for viewing satellite imagery and indices
-Enhanced with RGB band selection and percentile-based min/max controls
+Enhanced with RGB band selection, percentile-based min/max controls, and CCP payment integration
 """
 
 import streamlit as st
@@ -8,10 +8,14 @@ import geopandas as gpd
 import osmnx as ox
 import ee
 from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 import geemap.foliumap as geemap
 import folium
 import json
 import pandas as pd
+
+# Import payment module
+import payment_ccp as payment
 
 # ============================================================================
 # PAGE CONFIGURATION - MUST BE FIRST
@@ -57,6 +61,8 @@ if "ee_initialized" not in st.session_state:
     initialize_earth_engine()
     st.session_state.ee_initialized = True
 
+# Initialize payment system
+payment.init_payment_state()
 
 # Satellite datasets configuration
 SATELLITE_OPTIONS = {
@@ -313,24 +319,43 @@ INDEX_FUNCTIONS = {
 # LOCATION AND GEOMETRY UTILITIES
 # ============================================================================
 
+geolocator = Nominatim(
+    user_agent="sat-index-viewer/1.0 (mechakrasalah@gmail.com)",
+    timeout=10
+)
+
+# Built-in rate limiting to avoid throttling
+safe_geocode = RateLimiter(
+    geolocator.geocode,
+    min_delay_seconds=1,
+    swallow_exceptions=False
+)
+
 
 def get_location_suggestions(query, limit=5):
-    """Get location suggestions using Nominatim geocoder"""
+    """Fault-tolerant autosuggest compatible with Nominatim constraints."""
     if not query:
         return []
 
     try:
-        geolocator = Nominatim(user_agent="sat-index-viewer")
-        hits = geolocator.geocode(
-            query, exactly_one=False, limit=limit, addressdetails=True
+        hits = safe_geocode(
+            query,
+            exactly_one=False,
+            limit=limit,
+            addressdetails=True
         )
+
         if not hits:
             return []
-        return [{"name": h.address, "lat": h.latitude, "lon": h.longitude} for h in hits]
-    except Exception as e:
-        st.warning(f"Suggestion lookup error: {e}")
-        return []
 
+        return [
+            {"name": h.address, "lat": h.latitude, "lon": h.longitude}
+            for h in hits
+        ]
+
+    except Exception as e:
+        st.warning("Geocoding service temporarily unavailable. Try again.")
+        return []
 
 def get_boundary_geometry(name):
     """Get polygon/multipolygon boundary as a GeoDataFrame"""
@@ -491,63 +516,6 @@ def get_required_bands(index, sensor_type):
             return ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7']
 
     return band_requirements.get(index, [])
-
-
-def calculate_image_statistics(image, geometry, scale, stretch_type, stretch_min, stretch_max, index):
-    """Calculate min/max statistics for image visualization"""
-    try:
-        # --- Step 1: Try absolute min/max first ---
-        stats = image.reduceRegion(
-            reducer=ee.Reducer.minMax(),
-            geometry=geometry,
-            scale=scale,
-            maxPixels=1e13,
-            bestEffort=True,
-            tileScale=2
-        ).getInfo()
-
-        min_val = stats.get(f"{index}_min") or stats.get("min")
-        max_val = stats.get(f"{index}_max") or stats.get("max")
-
-        # Fallback: look for any 'min'/'max' keys
-        if min_val is None or max_val is None:
-            min_keys = [k for k in stats.keys() if "min" in k.lower()]
-            max_keys = [k for k in stats.keys() if "max" in k.lower()]
-            if min_keys and max_keys:
-                min_val = stats[min_keys[0]]
-                max_val = stats[max_keys[0]]
-
-        # --- Step 2: If min/max invalid or too narrow, try percentiles ---
-        if (
-            min_val is None or max_val is None
-            or (max_val - min_val) < 0.2  # suspiciously narrow range
-            or stretch_type == "Percentile (like Earth Engine)"
-        ):
-            stats = image.reduceRegion(
-                reducer=ee.Reducer.percentile([stretch_min, stretch_max]),
-                geometry=geometry,
-                scale=scale,
-                maxPixels=1e13,
-                bestEffort=True,
-                tileScale=2
-            ).getInfo()
-
-            min_key = f"{index}_p{int(stretch_min)}"
-            max_key = f"{index}_p{int(stretch_max)}"
-            min_val = stats.get(min_key) or stats.get(f"p{int(stretch_min)}")
-            max_val = stats.get(max_key) or stats.get(f"p{int(stretch_max)}")
-
-        # --- Step 3: Final fallback to defaults ---
-        if min_val is None or max_val is None:
-            min_val, max_val = INDEX_DEFAULTS.get(index, (-1, 1))
-
-        st.info(f"Retrieved {index} min={min_val:.2f}, max={max_val:.2f}")
-
-        return float(min_val), float(max_val)
-
-    except Exception as e:
-        print(f"Statistics calculation failed: {e}")
-        return INDEX_DEFAULTS.get(index, (-1, 1))
 
 
 def calculate_rgb_stretch_values(image, geometry, rgb_bands, stretch_method,
@@ -883,10 +851,51 @@ def display_band_info(satellite, rgb_bands=None):
                 "Blue Band", f"{rgb_bands[2]} ({available_bands[rgb_bands[2]]})")
 
 
+def display_usage_sidebar():
+    """Display usage and subscription info in sidebar"""
+    st.sidebar.markdown("---")
+    st.sidebar.header("📊 Account Status")
+    
+    # Display current plan
+    current_plan = payment.PAYMENT_PLANS[st.session_state.user_plan]
+    st.sidebar.metric("Current Plan", current_plan['name'])
+    
+    # Display remaining uses
+    remaining = payment.get_remaining_uses()
+    st.sidebar.metric("Maps Remaining Today", remaining)
+    
+    # Plan-specific info
+    if st.session_state.user_plan == "free":
+        st.sidebar.warning("🎯 Upgrade for unlimited access!")
+        if st.sidebar.button("💎 Upgrade Now", use_container_width=True):
+            st.session_state.show_payment_page = True
+            st.rerun()
+    else:
+        if st.session_state.plan_expiry:
+            from datetime import datetime
+            expiry = datetime.fromisoformat(st.session_state.plan_expiry)
+            days_left = (expiry - datetime.now()).days
+            st.sidebar.info(f"⏰ {days_left} days remaining")
+    
+    # Quick upgrade button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("💳 Manage Subscription", use_container_width=True):
+        st.session_state.show_payment_page = True
+        st.rerun()
+
+
 def main():
     """Main application function"""
     # Initialize Earth Engine
     initialize_earth_engine()
+    
+    # Initialize payment system
+    payment.init_payment_state()
+    
+    # Check if we should show payment page
+    if st.session_state.get('show_payment_page', False):
+        payment.show_payment_interface()
+        return
 
     # Title and description
     st.title("🛰️ Satellite Index Visualizer 🛰️")
@@ -898,6 +907,9 @@ def main():
     # Create sidebar controls
     (start_date, end_date, satellite, index, cloud_percent,
      rgb_bands, stretch_method, min_percentile, max_percentile, min_val, max_val) = create_sidebar_controls()
+    
+    # Display usage info in sidebar
+    display_usage_sidebar()
 
     # Create location input
     selected_geometry, selected_name = create_location_input()
@@ -924,12 +936,22 @@ def main():
         if not selected_name or not selected_geometry:
             st.error("⚠️ Please enter a location and select a valid suggestion.")
         else:
-            with st.spinner(f"Processing {index} for {selected_name}..."):
-                show_map(
-                    selected_geometry, start_date, end_date, satellite,
-                    index, cloud_percent, stretch_method, min_percentile, max_percentile,
-                    min_val, max_val, rgb_bands
-                )
+            # CHECK USAGE LIMIT BEFORE GENERATING MAP
+            if not payment.check_usage_limit():
+                st.error("⚠️ You've reached your daily map generation limit!")
+                payment.show_payment_gate()
+            else:
+                with st.spinner(f"Processing {index} for {selected_name}..."):
+                    result = show_map(
+                        selected_geometry, start_date, end_date, satellite,
+                        index, cloud_percent, stretch_method, min_percentile, max_percentile,
+                        min_val, max_val, rgb_bands
+                    )
+                    
+                    if result[0] is not None:
+                        # RECORD MAP GENERATION
+                        payment.record_map_generation()
+                        st.success(f"✅ Map generated successfully! You have {payment.get_remaining_uses()} maps remaining today.")
 
     # Information sections
     col1, col2 = st.columns(2)
@@ -984,6 +1006,23 @@ def main():
         - Use SWIR bands for geological and moisture analysis
         - Lower percentiles (1%-99%) for higher contrast in urban areas
         """)
+    
+    # Subscription info at bottom
+    with st.expander("💳 Subscription Plans"):
+        st.markdown(f"""
+        **Current Plan:** {payment.PAYMENT_PLANS[st.session_state.user_plan]['name']}
+        
+        **Available Plans:**
+        - **Free Plan**: 5 maps per day - 0 DZD
+        - **Basic Plan**: 50 maps per day - 500 DZD/month
+        - **Pro Plan**: Unlimited maps - 1,500 DZD/month
+        
+        Upgrade to unlock more features and higher usage limits!
+        """)
+        
+        if st.button("View All Plans & Upgrade", type="primary"):
+            st.session_state.show_payment_page = True
+            st.rerun()
 
 
 if __name__ == "__main__":
